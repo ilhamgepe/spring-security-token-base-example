@@ -34,32 +34,31 @@ Production-ready authentication base untuk Spring Boot. Dirancang stateless, ama
 ## Arsitektur & Package Structure
 
 ```
-auth/
-├── delivery/http/
-│   ├── AuthController.java          # /v1/app/auth — register, login, refresh, me
-│   └── JwksController.java          # /.well-known/jwks.json
-├── internal/
-│   ├── entity/
-│   │   ├── SigningKey.java           # RSA key pair di DB
-│   │   ├── Credential.java          # Email + password hash per provider
-│   │   └── RefreshSession.java      # Session + refresh token hash
-│   ├── repo/                        # JPA Repositories
-│   └── service/
-│       └── LocalAuthService.java    # Login & register flow
-└── security/
-    ├── securityConfig.java          # Spring Security filter chain
-    ├── JwtAuthenticationFilter.java # Extract + verify Bearer token per request
-    ├── TokenService.java            # Issue & verify AT, issue & rotate RT
-    ├── RsaKeyService.java           # Generate, rotate, load RSA key pair
-    ├── PrivateKeyEncryptor.java     # Encrypt/decrypt private key via Tink AEAD
-    ├── AuthorityCacheService.java   # Load roles dari Redis / DB fallback
-    ├── SigningKeyCacheService.java  # Cache public key di Redis untuk verify JWT
-    ├── SecurityBootstrap.java       # Ensure active key exists on startup
-    ├── SecurityEventListener.java   # Revoke all sessions on replay attack
-    ├── LoginRateLimiterService.java # Rate limit per-IP dan per-username
-    └── scheduler/
-        ├── KeyRotationJob.java      # Quartz job: rotate RSA key
-        └── KeyRotationJobConfig.java
+com.gepe.bayr
+├── auth/
+│   ├── api/
+│   │   ├── event/                   # Domain events (e.g., ReplayAttack)
+│   │   └── type/                    # Enums like AuthProviderType
+│   └── internal/
+│       ├── config/                  # Spring Security config, startup logic
+│       ├── crypto/                  # RSA key services, Tink encryptor
+│       ├── delivery/http/           # Controllers (Auth, JWKS) + DTOs
+│       ├── entity/                  # JPA entities for auth (Credential, Session)
+│       ├── filter/                  # JwtAuthenticationFilter
+│       ├── repo/                    # JPA repositories for auth
+│       ├── scheduler/               # Quartz jobs for key rotation
+│       └── service/                 # Core auth services (Token, Login, Rate Limiting)
+├── user/
+│   ├── api/                         # Public interface for the user module (Facade, DTOs)
+│   └── internal/
+│       ├── entity/                  # User, Role, UserProfile entities
+│       ├── repo/                    # JPA repositories for user
+│       └── service/                 # User service implementation
+└── shared/
+    ├── config/                      # Global configs (i18n, Jackson)
+    ├── exception/                   # Global exception handler
+    ├── jpa/                         # Base entities (e.g., for auditing)
+    └── web/                         # Web configs, standard API responses
 ```
 
 ---
@@ -69,7 +68,7 @@ auth/
 ### 1. Register
 
 ```
-POST /v1/app/auth/register
+POST /app/v1/auth/register
 { "email": "...", "password": "...", "nickname": "..." }
 ```
 
@@ -84,7 +83,7 @@ AuthController
 ### 2. Login
 
 ```
-POST /v1/app/auth/login
+POST /app/v1/auth/login
 { "email": "...", "password": "..." }
 ```
 
@@ -124,7 +123,7 @@ JwtAuthenticationFilter
 ### 4. Refresh Token
 
 ```
-POST /v1/app/auth/refresh
+POST /app/v1/auth/refresh
 { "refreshToken": "<sessionId>.<rawSecret>" }
 ```
 
@@ -245,10 +244,11 @@ CronScheduleBuilder.cronSchedule("0 0 2 * * ?")
 
 | Method | Path | Auth | Deskripsi |
 |---|---|---|---|
-| `POST` | `/v1/app/auth/register` | Public | Registrasi user baru |
-| `POST` | `/v1/app/auth/login` | Public | Login, return AT + RT |
-| `POST` | `/v1/app/auth/refresh` | Public | Rotate refresh token |
-| `GET` | `/v1/app/auth/me` | Bearer AT | Data user yang sedang login |
+| `POST` | `/app/v1/auth/register` | Public | Registrasi user baru |
+| `POST` | `/app/v1/auth/login` | Public | Login, return AT + RT |
+| `POST` | `/app/v1/auth/logout` | Bearer AT | Logout, invalidate refresh token |
+| `POST` | `/app/v1/auth/refresh` | Public | Rotate refresh token |
+| `GET` | `/app/v1/auth/me` | Bearer AT | Data user yang sedang login |
 | `GET` | `/.well-known/jwks.json` | Public | JWKS untuk verifikasi JWT eksternal |
 
 ### Contoh Response Login
@@ -258,7 +258,18 @@ CronScheduleBuilder.cronSchedule("0 0 2 * * ?")
   "message": "Login successful",
   "data": {
     "accessToken": "eyJraWQ...",
-    "refreshToken": "01935c2a-...<sessionId>.<rawSecret>"
+    "refreshToken": "01935c2a-...<sessionId>.<rawSecret>",
+    "user": {
+      "id": "01935c2a-e033-7466-9a9f-3e3b71a19903",
+      "nickname": "Gepe",
+      "email": "gepe@gepe.com",
+      "status": "ACTIVE",
+      "roles": ["USER"],
+      "profile": {
+          "fullName": "Gepe Ganteng",
+          "pictureUrl": "https://.../picture.jpg"
+      }
+    }
   }
 }
 ```
