@@ -1,0 +1,101 @@
+server:
+  port: ${SERVER_PORT:8080}
+spring:
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  application:
+    name: bayr
+
+  sql:
+    init:
+      mode: never
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.dialect: org.hibernate.dialect.PostgreSQLDialect
+      hibernate.format_sql: true
+    show-sql: true
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:bayr}
+    username: ${DB_USERNAME:bayr_user}
+    password: ${DB_PASSWORD:secret}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      minimum-idle: 2
+      maximum-pool-size: 10
+      connection-timeout: 30000
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:redis_secret}
+      timeout: 2000ms
+      ssl:
+        enabled: ${REDIS_SSL:false}
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+
+  modulith:
+    events:
+      staleness:
+        processing: 10m   # event stuck di status PROCESSING > 10m → eligible republish
+        published: 10m    # event stuck di status PUBLISHED > 10m → eligible republish
+        resubmitted: 10m  # event stuck di status RESUBMITTED > 10m → eligible republish
+#        check-intervall: 10m
+      completion-mode: archive
+      republish-outstanding-events-on-restart: false # KALO MICRO SERVICE/TAMBAH INSTANCE PAKE KAFKA AJA BUAT MESSAGE BROKER JGN MODULITH atau pake QUARTZ SCHEDULER atau SHEDLOCK
+
+  docker:
+    compose:
+      lifecycle-management: start_only
+      enabled: false # jgn di true in dia ga ambil env dari .env yang udah di set di intelij.
+      skip:
+        in-tests: true
+
+  quartz:
+    job-store-type: jdbc          # simpan di DB, bukan RAM
+    jdbc:
+      initialize-schema: never    # kita pakai Flyway, jangan auto-init
+    properties: # dapet dari sini https://www.quartz-scheduler.org/documentation/quartz-2.5.x/configuration/ConfigJDBCJobStoreClustering.html
+      org.quartz.scheduler.instanceName: "BayrScheduler"
+      org.quartz.scheduler.instanceId: "AUTO"
+      org.quartz.jobStore.class: "org.springframework.scheduling.quartz.LocalDataSourceJobStore"
+      org.quartz.jobStore.driverDelegateClass: "org.quartz.impl.jdbcjobstore.PostgreSQLDelegate"
+      org.quartz.jobStore.tablePrefix: "QRTZ_"
+      org.quartz.jobStore.isClustered: true
+      org.quartz.jobStore.clusterCheckinInterval: 20000
+      org.quartz.threadPool.threadCount: 10
+    overwrite-existing-jobs: true
+
+
+app:
+  jwt:
+    issuer: "${AUTH_ISSUER}:https://bayr.com"
+    access-token-ttl: "${AUTH_ACCESS_TOKEN_TTL:15m}"
+    refresh-token-ttl: "${AUTH_REFRESH_TOKEN_TTL:15d}"
+
+  rsa:
+    rotation-ttl: "${AUTH_RSA_ROTATION_TTL:30d}"
+
+
+  tink:
+    # Generate once with TinkKeyEncryptor.generateNewKeysetJson() and store in secrets manager
+    # NEVER commit this to source control – inject via env var or Vault
+    keyset-json: "${TINK_KEYSET_JSON}"
+
+
+logging:
+  level:
+    org:
+      springframework:
+        modulith: warn
+      flywaydb: info
+      quartz: info
