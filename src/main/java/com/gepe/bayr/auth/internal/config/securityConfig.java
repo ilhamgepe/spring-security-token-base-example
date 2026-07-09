@@ -52,7 +52,7 @@ public class securityConfig {
                     auth.requestMatchers("/actuator/**").hasRole("ADMIN");
 
                     // operation
-//                    auth.requestMatchers("/operations/**").hasRole("ADMIN");
+                    // auth.requestMatchers("/operations/**").hasRole("ADMIN"); // UNCOMMENT THIS WHEN YOU HAVE ADMIN ROLE
 
                     auth.anyRequest().authenticated();
                 })
