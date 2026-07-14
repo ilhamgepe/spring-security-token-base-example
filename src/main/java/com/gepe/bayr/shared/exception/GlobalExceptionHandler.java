@@ -26,6 +26,7 @@ import tools.jackson.databind.exc.InvalidFormatException;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestControllerAdvice
@@ -48,7 +49,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleValidation(
             MethodArgumentNotValidException exception
     ) {
-
+        exception.getBindingResult()
+                .getFieldErrors()
+                .forEach(e -> {
+                    System.out.println("code      = " + e.getCode());
+                    System.out.println("message   = " + e.getDefaultMessage());
+                    System.out.println("arguments = " + Arrays.toString(e.getArguments()));
+                });
         List<ValidationError> errors = exception
                 .getBindingResult()
                 .getFieldErrors()
@@ -131,17 +138,34 @@ public class GlobalExceptionHandler {
         }
 
         if (ife != null) {
-            String fieldName = ife.getPath().isEmpty() ? "unknown"
+            String fieldName = ife.getPath().isEmpty()
+                    ? "unknown"
                     : ife.getPath().get(0).getPropertyName();
 
             if (ife.getTargetType() != null && ife.getTargetType().isEnum()) {
+
                 String accepted = Arrays.stream(ife.getTargetType().getEnumConstants())
                         .map(Object::toString)
                         .collect(Collectors.joining(", "));
-                detail = messageHelper.get("http.invalid_enum_field", fieldName, accepted);
-            } else {
-                detail = messageHelper.get("http.invalid_field_value", fieldName, ife.getValue());
+
+                ValidationError error = new ValidationError(
+                        fieldName,
+                        messageHelper.get("http.invalid_enum_field", accepted)
+                );
+
+                return ResponseEntity.badRequest().body(
+                        new ErrorResponse(
+                                messageHelper.get("validation.failed"),
+                                List.of(error)
+                        )
+                );
             }
+
+            detail = messageHelper.get(
+                    "http.invalid_field_value",
+                    fieldName,
+                    ife.getValue()
+            );
         }
 
         return ResponseEntity.badRequest().body(new ErrorResponse(messageHelper.get("http.bad_request"), detail));
@@ -286,20 +310,36 @@ public class GlobalExceptionHandler {
     }
 
     private ValidationError toValidationError(FieldError error) {
-
-        return new ValidationError(
-                error.getField(),
-                messageHelper.get(error.getDefaultMessage())
-        );
+        ConstraintViolation<?> violation = error.unwrap(ConstraintViolation.class);
+        return toValidationError(violation, error.getField());
     }
 
-    private ValidationError toValidationError(
-            ConstraintViolation<?> violation
-    ) {
+    private ValidationError toValidationError(ConstraintViolation<?> violation) {
+        return toValidationError(violation, violation.getPropertyPath().toString());
+    }
 
-        return new ValidationError(
-                violation.getPropertyPath().toString(),
-                messageHelper.get(violation.getMessage())
-        );
+    private static final Map<String, List<String>> CONSTRAINT_ARGS = Map.of(
+            "Min", List.of("value"),
+            "Max", List.of("value"),
+            "Size", List.of("min", "max"),
+            "Range", List.of("min", "max"),
+            "DecimalMin", List.of("value"),
+            "DecimalMax", List.of("value")
+    );
+
+    private ValidationError toValidationError(ConstraintViolation<?> violation, String field) {
+        String constraintName = violation.getConstraintDescriptor()
+                .getAnnotation()
+                .annotationType()
+                .getSimpleName();
+
+        Map<String, Object> attrs = violation.getConstraintDescriptor().getAttributes();
+
+        Object[] args = CONSTRAINT_ARGS.getOrDefault(constraintName, List.of())
+                .stream()
+                .map(attrs::get)
+                .toArray();
+
+        return new ValidationError(field, messageHelper.get(violation.getMessage(), args));
     }
 }
